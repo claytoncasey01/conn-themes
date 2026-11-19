@@ -32,13 +32,15 @@ Rules the build enforces, so a pull request that breaks one will not be listed:
 
 `.gitattributes` marks `*.json` as `-text` on purpose: the index pins the sha256 of each file's exact bytes, so git must never convert its line endings (autocrlf on a contributor's machine would otherwise make an installed file hash differently from the index). Keep it.
 
-After merging, build the index at the merged commit from a conn checkout, with this repo checked out at that commit and its files exactly as committed (no line-ending conversion):
+Merging a theme rebuilds the index: [`.github/workflows/index.yml`](.github/workflows/index.yml) runs on every push to `main` that changes a `theme.json`, builds `conn theme index` from conn's `main`, and commits `index.json` to `main` as `github-actions[bot]`. It pushes with the deploy key in the `INDEX_DEPLOY_KEY` secret: deploy keys are the one bypass the `main` ruleset allows besides the owner, so keep that key the repo's only one with write access. If the run fails, a theme failed conn's checks (the log names it) or `main` moved during the run; fix the theme, or re-run it from the Actions tab (it also has a manual trigger).
+
+To build the index by hand, from a conn checkout, with this repo checked out at `main` and its files exactly as committed (no line-ending conversion):
 
 ```sh
 conn theme index --src ../conn-themes --out ../conn-themes-out --commit "$(git -C ../conn-themes rev-parse HEAD)" --repo claytoncasey01/conn-themes
 ```
 
-Copy `../conn-themes-out/index.json` over this repo's `index.json` and commit it to `main`. conn reads `https://raw.githubusercontent.com/claytoncasey01/conn-themes/main/index.json` and, for an install, `.../<commit>/<id>/theme.json`.
+Then copy `../conn-themes-out/index.json` over this repo's `index.json`. conn reads `https://raw.githubusercontent.com/claytoncasey01/conn-themes/main/index.json` and, for an install, `.../<commit>/<id>/theme.json`.
 
 ## License
 

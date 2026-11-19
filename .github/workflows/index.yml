@@ -1,0 +1,77 @@
+# Rebuilds index.json whenever a theme lands on main, so a merged theme reaches conn without a
+# maintainer remembering to run the indexer. conn reads only index.json, so a theme missing from
+# it does not show in the gallery at all.
+name: Rebuild the index
+
+on:
+  push:
+    branches: [main]
+    # The bot's own index.json commit touches neither path, so it never triggers another run.
+    paths:
+      - "*/theme.json"
+      - ".github/workflows/index.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+# Runs one at a time, each on the newest main, so a run never overwrites a newer index.
+concurrency:
+  group: index
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # main's ruleset requires a reviewed pull request; this repo's deploy key is the one
+      # bypass besides the owner, so the checkout keeps it for the push at the end.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: themes
+          ssh-key: ${{ secrets.INDEX_DEPLOY_KEY }}
+
+      # The indexer comes from conn's main: a theme that uses a token only a newer conn knows
+      # is checked against that newer conn, not a release that predates it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: claytoncasey01/conn
+          ref: main
+          path: conn
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: conn/go.mod
+          cache-dependency-path: conn/go.sum
+
+      # Indexing needs no page, but conn embeds dist/, so it only has to exist to compile.
+      - name: Build conn's indexer
+        working-directory: conn
+        run: |
+          mkdir -p dist
+          printf '<!doctype html>\n' > dist/index.html
+          go build -o "$RUNNER_TEMP/conn" ./cmd/conn
+
+      # A theme that fails conn's checks fails this step, and nothing is written.
+      - name: Build the index at main
+        run: |
+          commit="$(git -C themes rev-parse HEAD)"
+          "$RUNNER_TEMP/conn" theme index --src themes --out "$RUNNER_TEMP/index-out" \
+            --commit "$commit" --repo "$GITHUB_REPOSITORY"
+          cp "$RUNNER_TEMP/index-out/index.json" themes/index.json
+
+      - name: Commit the index
+        working-directory: themes
+        run: |
+          if git diff --quiet -- index.json; then
+            echo "index.json is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet -m "Rebuild the index at $(git rev-parse --short HEAD)" -- index.json
+          git push origin HEAD:main
